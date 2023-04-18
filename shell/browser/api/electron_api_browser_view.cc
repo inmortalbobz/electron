@@ -8,6 +8,7 @@
 
 #include "content/browser/renderer_host/render_widget_host_view_base.h"  // nogncheck
 #include "content/public/browser/render_widget_host_view.h"
+#include "shell/browser/api/electron_api_base_window.h"
 #include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/native_browser_view.h"
@@ -19,6 +20,7 @@
 #include "shell/common/gin_helper/object_template_builder.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/options_switches.h"
+#include "ui/base/hit_test.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace gin {
@@ -99,12 +101,21 @@ BrowserView::BrowserView(gin::Arguments* args,
       NativeBrowserView::Create(api_web_contents_->inspectable_web_contents()));
 }
 
-void BrowserView::SetOwnerWindow(NativeWindow* window) {
+void BrowserView::SetOwnerWindow(BaseWindow* window) {
   // Ensure WebContents and BrowserView owner windows are in sync.
   if (web_contents())
-    web_contents()->SetOwnerWindow(window);
+    web_contents()->SetOwnerWindow(window ? window->window() : nullptr);
 
   owner_window_ = window ? window->GetWeakPtr() : nullptr;
+}
+
+int BrowserView::NonClientHitTest(const gfx::Point& point) {
+  gfx::Rect bounds = GetBounds();
+  gfx::Point local_point(point.x() - bounds.x(), point.y() - bounds.y());
+  SkRegion* region = api_web_contents_->draggable_region();
+  if (region && region->contains(local_point.x(), local_point.y()))
+    return HTCAPTION;
+  return HTNOWHERE;
 }
 
 BrowserView::~BrowserView() {
@@ -115,14 +126,12 @@ BrowserView::~BrowserView() {
 }
 
 void BrowserView::WebContentsDestroyed() {
+  if (owner_window())
+    owner_window()->window()->RemoveDraggableRegionProvider(this);
+
   api_web_contents_ = nullptr;
   web_contents_.Reset();
   Unpin();
-}
-
-void BrowserView::OnDraggableRegionsUpdated(
-    const std::vector<mojom::DraggableRegionPtr>& regions) {
-  view_->UpdateDraggableRegions(regions);
 }
 
 // static
@@ -186,10 +195,9 @@ v8::Local<v8::Value> BrowserView::GetWebContents(v8::Isolate* isolate) {
 }
 
 // static
-v8::Local<v8::ObjectTemplate> BrowserView::FillObjectTemplate(
-    v8::Isolate* isolate,
-    v8::Local<v8::ObjectTemplate> templ) {
-  return gin::ObjectTemplateBuilder(isolate, "BrowserView", templ)
+void BrowserView::FillObjectTemplate(v8::Isolate* isolate,
+                                     v8::Local<v8::ObjectTemplate> templ) {
+  gin::ObjectTemplateBuilder(isolate, "BrowserView", templ)
       .SetMethod("setAutoResize", &BrowserView::SetAutoResize)
       .SetMethod("setBounds", &BrowserView::SetBounds)
       .SetMethod("getBounds", &BrowserView::GetBounds)
@@ -216,4 +224,4 @@ void Initialize(v8::Local<v8::Object> exports,
 
 }  // namespace
 
-NODE_LINKED_MODULE_CONTEXT_AWARE(electron_browser_browser_view, Initialize)
+NODE_LINKED_BINDING_CONTEXT_AWARE(electron_browser_browser_view, Initialize)

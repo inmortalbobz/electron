@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
@@ -79,6 +80,8 @@ class NodeStreamLoader : public network::mojom::URLLoader {
 
   // Whether we are in the middle of a stream.read().
   bool is_reading_ = false;
+
+  size_t bytes_written_ = 0;
 
   // When NotifyComplete is called while writing, we will save the result and
   // quit with it after the write is done.

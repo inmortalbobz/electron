@@ -4,10 +4,13 @@
 
 #include "shell/browser/electron_browser_main_parts.h"
 
+#include <string>
+
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/path_service.h"
-#include "services/device/public/cpp/geolocation/geolocation_manager_impl_mac.h"
+#include "services/device/public/cpp/geolocation/system_geolocation_source_mac.h"
+#include "shell/browser/browser_process_impl.h"
 #import "shell/browser/mac/electron_application.h"
 #include "shell/browser/mac/electron_application_delegate.h"
 #include "shell/common/electron_paths.h"
@@ -29,7 +32,10 @@ void ElectronBrowserMainParts::PreCreateMainMessageLoop() {
       setObject:@"NO"
          forKey:@"NSTreatUnknownArgumentsAsOpen"];
 
-  geolocation_manager_ = device::GeolocationManagerImpl::Create();
+  if (!g_browser_process->geolocation_manager()) {
+    g_browser_process->SetGeolocationManager(
+        device::SystemGeolocationSourceMac::CreateGeolocationManagerOnMac());
+  }
 }
 
 void ElectronBrowserMainParts::FreeAppDelegate() {
@@ -72,6 +78,18 @@ void ElectronBrowserMainParts::InitializeMainNib() {
 
   [mainNib instantiateWithOwner:application topLevelObjects:nil];
   [mainNib release];
+}
+
+std::string ElectronBrowserMainParts::GetCurrentSystemLocale() {
+  NSString* systemLocaleIdentifier =
+      [[NSLocale currentLocale] localeIdentifier];
+
+  // Mac OS X uses "_" instead of "-", so swap to get a real locale value.
+  std::string locale_value = [[systemLocaleIdentifier
+      stringByReplacingOccurrencesOfString:@"_"
+                                withString:@"-"] UTF8String];
+
+  return locale_value;
 }
 
 }  // namespace electron

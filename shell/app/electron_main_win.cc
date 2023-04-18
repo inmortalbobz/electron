@@ -21,8 +21,9 @@
 #include "base/i18n/icu_util.h"
 #include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/win/dark_mode_support.h"
 #include "base/win/windows_version.h"
-#include "components/browser_watcher/exit_code_watcher_win.h"
+#include "chrome/app/exit_code_watcher_win.h"
 #include "components/crash/core/app/crash_switches.h"
 #include "components/crash/core/app/run_as_crashpad_handler_win.h"
 #include "content/public/app/content_main.h"
@@ -182,7 +183,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* cmd, int) {
 
   if (process_type == crash_reporter::switches::kCrashpadHandler) {
     // Check if we should monitor the exit code of this process
-    std::unique_ptr<browser_watcher::ExitCodeWatcher> exit_code_watcher;
+    std::unique_ptr<ExitCodeWatcher> exit_code_watcher;
 
     // Retrieve the client process from the command line
     crashpad::InitialClientData initial_client_data;
@@ -195,8 +196,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* cmd, int) {
               ::GetCurrentProcess(), &duplicate_handle,
               PROCESS_QUERY_INFORMATION, FALSE, DUPLICATE_SAME_ACCESS)) {
         base::Process parent_process(duplicate_handle);
-        exit_code_watcher =
-            std::make_unique<browser_watcher::ExitCodeWatcher>();
+        exit_code_watcher = std::make_unique<ExitCodeWatcher>();
         if (exit_code_watcher->Initialize(std::move(parent_process))) {
           exit_code_watcher->StartWatching();
         }
@@ -218,6 +218,11 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* cmd, int) {
     }
     return crashpad_status;
   }
+
+#if BUILDFLAG(IS_WIN)
+  // access ui native theme here to prevent blocking calls later
+  base::win::AllowDarkModeForApp(true);
+#endif
 
 #if defined(ARCH_CPU_32_BITS)
   // Intentionally crash if converting to a fiber failed.

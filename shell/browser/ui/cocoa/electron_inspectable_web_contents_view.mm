@@ -5,23 +5,13 @@
 #include "shell/browser/ui/cocoa/electron_inspectable_web_contents_view.h"
 
 #include "content/public/browser/render_widget_host_view.h"
+#include "shell/browser/api/electron_api_web_contents.h"
 #include "shell/browser/ui/cocoa/event_dispatching_window.h"
 #include "shell/browser/ui/inspectable_web_contents.h"
 #include "shell/browser/ui/inspectable_web_contents_view_delegate.h"
 #include "shell/browser/ui/inspectable_web_contents_view_mac.h"
+#include "ui/base/cocoa/base_view.h"
 #include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
-
-@implementation ControlRegionView
-
-- (BOOL)mouseDownCanMoveWindow {
-  return NO;
-}
-
-- (NSView*)hitTest:(NSPoint)aPoint {
-  return nil;
-}
-
-@end
 
 @implementation ElectronInspectableWebContentsView
 
@@ -48,9 +38,6 @@
     [contentsView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [self addSubview:contentsView];
   }
-
-  // This will float above devtools to exclude it from dragging.
-  devtools_mask_.reset([[ControlRegionView alloc] initWithFrame:NSZeroRect]);
 
   // See https://code.google.com/p/chromium/issues/detail?id=348490.
   [self setWantsLayer:YES];
@@ -116,12 +103,6 @@
   devtools_visible_ = visible;
   if (devtools_docked_) {
     if (visible) {
-      // The devToolsView is placed under the contentsView, so it has to be
-      // draggable to make draggable region of contentsView work.
-      [devToolsView setMouseDownCanMoveWindow:YES];
-      // This view will exclude the actual devtools part from dragging.
-      [self addSubview:devtools_mask_.get()];
-
       // Place the devToolsView under contentsView, notice that we didn't set
       // sizes for them until the setContentsResizingStrategy message.
       [self addSubview:devToolsView positioned:NSWindowBelow relativeTo:nil];
@@ -132,7 +113,6 @@
     } else {
       gfx::ScopedCocoaDisableScreenUpdates disabler;
       [devToolsView removeFromSuperview];
-      [devtools_mask_ removeFromSuperview];
       [self adjustSubviews];
       [self notifyDevToolsResized];
     }
@@ -225,7 +205,7 @@
   NSView* devToolsView = [[self subviews] objectAtIndex:0];
   NSView* contentsView = [[self subviews] objectAtIndex:1];
 
-  DCHECK_EQ(3u, [[self subviews] count]);
+  DCHECK_EQ(2u, [[self subviews] count]);
 
   gfx::Rect new_devtools_bounds;
   gfx::Rect new_contents_bounds;
@@ -253,7 +233,6 @@
     devtools_frame.size.width = sb.size.width - cf.size.width;
     devtools_frame.size.height = sb.size.height;
   }
-  [devtools_mask_ setFrame:devtools_frame];
 
   [self notifyDevToolsResized];
 }
@@ -294,6 +273,27 @@
   if ([self window] == parentWindow && devtools_docked_ &&
       devtools_is_first_responder_)
     [self notifyDevToolsFocused];
+}
+
+- (void)redispatchContextMenuEvent:(NSEvent*)event {
+  DCHECK(event.type == NSEventTypeRightMouseDown ||
+         (event.type == NSEventTypeLeftMouseDown &&
+          (event.modifierFlags & NSEventModifierFlagControl)));
+  content::WebContents* contents =
+      inspectableWebContentsView_->inspectable_web_contents()->GetWebContents();
+  electron::api::WebContents* api_contents =
+      electron::api::WebContents::From(contents);
+  if (api_contents) {
+    // Temporarily pretend that the WebContents is fully non-draggable while we
+    // re-send the mouse event. This allows the re-dispatched event to "land"
+    // on the WebContents, instead of "falling through" back to the window.
+    api_contents->SetForceNonDraggable(true);
+    BaseView* contentsView = (BaseView*)contents->GetRenderWidgetHostView()
+                                 ->GetNativeView()
+                                 .GetNativeNSView();
+    [contentsView mouseEvent:event];
+    api_contents->SetForceNonDraggable(false);
+  }
 }
 
 #pragma mark - NSWindowDelegate

@@ -56,12 +56,24 @@ bool ElectronSerialDelegate::HasPortPermission(
     content::RenderFrameHost* frame,
     const device::mojom::SerialPortInfo& port) {
   auto* web_contents = content::WebContents::FromRenderFrameHost(frame);
-  auto* browser_context = web_contents->GetBrowserContext();
-  auto* chooser_context =
-      SerialChooserContextFactory::GetForBrowserContext(browser_context);
-  return chooser_context->HasPortPermission(
+  return GetChooserContext(frame)->HasPortPermission(
       web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(), port,
       frame);
+}
+
+void ElectronSerialDelegate::RevokePortPermissionWebInitiated(
+    content::RenderFrameHost* frame,
+    const base::UnguessableToken& token) {
+  auto* web_contents = content::WebContents::FromRenderFrameHost(frame);
+  return GetChooserContext(frame)->RevokePortPermissionWebInitiated(
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(), token,
+      frame);
+}
+
+const device::mojom::SerialPortInfo* ElectronSerialDelegate::GetPortInfo(
+    content::RenderFrameHost* frame,
+    const base::UnguessableToken& token) {
+  return GetChooserContext(frame)->GetPortInfo(token);
 }
 
 device::mojom::SerialPortManager* ElectronSerialDelegate::GetPortManager(
@@ -69,30 +81,19 @@ device::mojom::SerialPortManager* ElectronSerialDelegate::GetPortManager(
   return GetChooserContext(frame)->GetPortManager();
 }
 
-void ElectronSerialDelegate::AddObserver(content::RenderFrameHost* frame,
-                                         Observer* observer) {
+void ElectronSerialDelegate::AddObserver(
+    content::RenderFrameHost* frame,
+    content::SerialDelegate::Observer* observer) {
   observer_list_.AddObserver(observer);
   auto* chooser_context = GetChooserContext(frame);
   if (!port_observation_.IsObserving())
     port_observation_.Observe(chooser_context);
 }
 
-void ElectronSerialDelegate::RemoveObserver(content::RenderFrameHost* frame,
-                                            Observer* observer) {
+void ElectronSerialDelegate::RemoveObserver(
+    content::RenderFrameHost* frame,
+    content::SerialDelegate::Observer* observer) {
   observer_list_.RemoveObserver(observer);
-}
-
-void ElectronSerialDelegate::RevokePortPermissionWebInitiated(
-    content::RenderFrameHost* frame,
-    const base::UnguessableToken& token) {
-  // TODO(nornagon/jkleinsc): pass this on to the chooser context
-}
-
-const device::mojom::SerialPortInfo* ElectronSerialDelegate::GetPortInfo(
-    content::RenderFrameHost* frame,
-    const base::UnguessableToken& token) {
-  // TODO(nornagon/jkleinsc): pass this on to the chooser context
-  return nullptr;
 }
 
 SerialChooserController* ElectronSerialDelegate::ControllerForFrame(

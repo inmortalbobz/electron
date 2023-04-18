@@ -13,8 +13,10 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/predictors/preconnect_manager.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/media_stream_request.h"
 #include "content/public/browser/resource_context.h"
 #include "electron/buildflags/buildflags.h"
+#include "gin/arguments.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
@@ -38,6 +40,13 @@ class ElectronExtensionSystem;
 }
 #endif
 
+namespace v8 {
+template <typename T>
+class Local;
+class Isolate;
+class Value;
+}  // namespace v8
+
 namespace electron {
 
 using DevicePermissionMap =
@@ -51,6 +60,15 @@ class ResolveProxyHelper;
 class WebViewManager;
 class ProtocolRegistry;
 
+using DisplayMediaResponseCallbackJs =
+    base::OnceCallback<void(gin::Arguments* args)>;
+using DisplayMediaRequestHandler =
+    base::RepeatingCallback<void(const content::MediaStreamRequest&,
+                                 DisplayMediaResponseCallbackJs)>;
+using PartitionOrPath =
+    std::variant<std::reference_wrapper<const std::string>,
+                 std::reference_wrapper<const base::FilePath>>;
+
 class ElectronBrowserContext : public content::BrowserContext {
  public:
   // disable copy
@@ -59,22 +77,43 @@ class ElectronBrowserContext : public content::BrowserContext {
 
   // partition_id => browser_context
   struct PartitionKey {
-    std::string partition;
+    enum class KeyType { Partition, FilePath };
+    std::string location;
     bool in_memory;
+    KeyType partition_type;
 
     PartitionKey(const std::string& partition, bool in_memory)
-        : partition(partition), in_memory(in_memory) {}
+        : location(partition),
+          in_memory(in_memory),
+          partition_type(KeyType::Partition) {}
+    explicit PartitionKey(const base::FilePath& file_path)
+        : location(file_path.AsUTF8Unsafe()),
+          in_memory(false),
+          partition_type(KeyType::FilePath) {}
 
     bool operator<(const PartitionKey& other) const {
-      if (partition == other.partition)
-        return in_memory < other.in_memory;
-      return partition < other.partition;
+      if (partition_type == KeyType::Partition) {
+        if (location == other.location)
+          return in_memory < other.in_memory;
+        return location < other.location;
+      } else {
+        if (location == other.location)
+          return false;
+        return location < other.location;
+      }
     }
 
     bool operator==(const PartitionKey& other) const {
-      return (partition == other.partition) && (in_memory == other.in_memory);
+      if (partition_type == KeyType::Partition) {
+        return (location == other.location) && (in_memory < other.in_memory);
+      } else {
+        if (location == other.location)
+          return true;
+        return false;
+      }
     }
   };
+
   using BrowserContextMap =
       std::map<PartitionKey, std::unique_ptr<ElectronBrowserContext>>;
 
@@ -84,6 +123,12 @@ class ElectronBrowserContext : public content::BrowserContext {
   static ElectronBrowserContext* From(const std::string& partition,
                                       bool in_memory,
                                       base::Value::Dict options = {});
+
+  // Get or create the BrowserContext using the |path|.
+  // The |options| will be passed to constructor when there is no
+  // existing BrowserContext.
+  static ElectronBrowserContext* FromPath(const base::FilePath& path,
+                                          base::Value::Dict options = {});
 
   static BrowserContextMap& browser_context_map();
 
@@ -118,16 +163,15 @@ class ElectronBrowserContext : public content::BrowserContext {
   content::ClientHintsControllerDelegate* GetClientHintsControllerDelegate()
       override;
   content::StorageNotificationService* GetStorageNotificationService() override;
+  content::ReduceAcceptLanguageControllerDelegate*
+  GetReduceAcceptLanguageControllerDelegate() override;
 
   CookieChangeNotifier* cookie_change_notifier() const {
     return cookie_change_notifier_.get();
   }
   PrefService* prefs() const { return prefs_.get(); }
-  void set_in_memory_pref_store(ValueMapPrefStore* pref_store) {
-    in_memory_pref_store_ = pref_store;
-  }
   ValueMapPrefStore* in_memory_pref_store() const {
-    return in_memory_pref_store_;
+    return in_memory_pref_store_.get();
   }
   base::WeakPtr<ElectronBrowserContext> GetWeakPtr() {
     return weak_factory_.GetWeakPtr();
@@ -149,6 +193,10 @@ class ElectronBrowserContext : public content::BrowserContext {
   void SetSSLConfig(network::mojom::SSLConfigPtr config);
   network::mojom::SSLConfigPtr GetSSLConfig();
   void SetSSLConfigClient(mojo::Remote<network::mojom::SSLConfigClient> client);
+
+  bool ChooseDisplayMediaDevice(const content::MediaStreamRequest& request,
+                                content::MediaResponseCallback callback);
+  void SetDisplayMediaRequestHandler(DisplayMediaRequestHandler handler);
 
   ~ElectronBrowserContext() override;
 
@@ -172,9 +220,16 @@ class ElectronBrowserContext : public content::BrowserContext {
                              blink::PermissionType permissionType);
 
  private:
-  ElectronBrowserContext(const std::string& partition,
+  ElectronBrowserContext(const PartitionOrPath partition_location,
                          bool in_memory,
                          base::Value::Dict options);
+
+  ElectronBrowserContext(base::FilePath partition, base::Value::Dict options);
+
+  static void DisplayMediaDeviceChosen(
+      const content::MediaStreamRequest& request,
+      content::MediaResponseCallback callback,
+      gin::Arguments* args);
 
   // Initialize pref registry.
   void InitPrefs();
@@ -183,8 +238,7 @@ class ElectronBrowserContext : public content::BrowserContext {
                        const base::Value* device_to_compare,
                        blink::PermissionType permission_type);
 
-  ValueMapPrefStore* in_memory_pref_store_ = nullptr;
-
+  scoped_refptr<ValueMapPrefStore> in_memory_pref_store_;
   std::unique_ptr<content::ResourceContext> resource_context_;
   std::unique_ptr<CookieChangeNotifier> cookie_change_notifier_;
   std::unique_ptr<PrefService> prefs_;
@@ -213,6 +267,8 @@ class ElectronBrowserContext : public content::BrowserContext {
 
   network::mojom::SSLConfigPtr ssl_config_;
   mojo::Remote<network::mojom::SSLConfigClient> ssl_config_client_;
+
+  DisplayMediaRequestHandler display_media_request_handler_;
 
   // In-memory cache that holds objects that have been granted permissions.
   DevicePermissionMap granted_devices_;

@@ -1,4 +1,4 @@
-import { app, ipcMain, session, webFrameMain, deprecate } from 'electron/main';
+import { app, ipcMain, session, webFrameMain } from 'electron/main';
 import type { BrowserWindowConstructorOptions, LoadURLOptions } from 'electron/main';
 
 import * as url from 'url';
@@ -10,6 +10,7 @@ import * as ipcMainUtils from '@electron/internal/browser/ipc-main-internal-util
 import { MessagePortMain } from '@electron/internal/browser/message-port-main';
 import { IPC_MESSAGES } from '@electron/internal/common/ipc-messages';
 import { IpcMainImpl } from '@electron/internal/browser/ipc-main-impl';
+import * as deprecate from '@electron/internal/common/deprecate';
 
 // session is not used here, the purpose is to make sure session is initialized
 // before the webContents module.
@@ -27,11 +28,47 @@ type PostData = LoadURLOptions['postData']
 
 // Stock page sizes
 const PDFPageSizes: Record<string, ElectronInternal.MediaSize> = {
-  A5: {
-    custom_display_name: 'A5',
-    height_microns: 210000,
-    name: 'ISO_A5',
-    width_microns: 148000
+  Letter: {
+    custom_display_name: 'Letter',
+    height_microns: 279400,
+    name: 'NA_LETTER',
+    width_microns: 215900
+  },
+  Legal: {
+    custom_display_name: 'Legal',
+    height_microns: 355600,
+    name: 'NA_LEGAL',
+    width_microns: 215900
+  },
+  Tabloid: {
+    height_microns: 431800,
+    name: 'NA_LEDGER',
+    width_microns: 279400,
+    custom_display_name: 'Tabloid'
+  },
+  A0: {
+    custom_display_name: 'A0',
+    height_microns: 1189000,
+    name: 'ISO_A0',
+    width_microns: 841000
+  },
+  A1: {
+    custom_display_name: 'A1',
+    height_microns: 841000,
+    name: 'ISO_A1',
+    width_microns: 594000
+  },
+  A2: {
+    custom_display_name: 'A2',
+    height_microns: 594000,
+    name: 'ISO_A2',
+    width_microns: 420000
+  },
+  A3: {
+    custom_display_name: 'A3',
+    height_microns: 420000,
+    name: 'ISO_A3',
+    width_microns: 297000
   },
   A4: {
     custom_display_name: 'A4',
@@ -40,29 +77,17 @@ const PDFPageSizes: Record<string, ElectronInternal.MediaSize> = {
     is_default: 'true',
     width_microns: 210000
   },
-  A3: {
-    custom_display_name: 'A3',
-    height_microns: 420000,
-    name: 'ISO_A3',
-    width_microns: 297000
+  A5: {
+    custom_display_name: 'A5',
+    height_microns: 210000,
+    name: 'ISO_A5',
+    width_microns: 148000
   },
-  Legal: {
-    custom_display_name: 'Legal',
-    height_microns: 355600,
-    name: 'NA_LEGAL',
-    width_microns: 215900
-  },
-  Letter: {
-    custom_display_name: 'Letter',
-    height_microns: 279400,
-    name: 'NA_LETTER',
-    width_microns: 215900
-  },
-  Tabloid: {
-    height_microns: 431800,
-    name: 'NA_LEDGER',
-    width_microns: 279400,
-    custom_display_name: 'Tabloid'
+  A6: {
+    custom_display_name: 'A6',
+    height_microns: 148000,
+    name: 'ISO_A6',
+    width_microns: 105000
   }
 } as const;
 
@@ -173,13 +198,13 @@ WebContents.prototype.printToPDF = async function (options) {
     headerTemplate: '',
     footerTemplate: '',
     printBackground: false,
-    scale: 1,
+    scale: 1.0,
     paperWidth: 8.5,
-    paperHeight: 11,
-    marginTop: 0,
-    marginBottom: 0,
-    marginLeft: 0,
-    marginRight: 0,
+    paperHeight: 11.0,
+    marginTop: 0.4,
+    marginBottom: 0.4,
+    marginLeft: 0.4,
+    marginRight: 0.4,
     pageRanges: '',
     preferCSSPageSize: false
   };
@@ -209,7 +234,7 @@ WebContents.prototype.printToPDF = async function (options) {
     if (typeof options.scale !== 'number') {
       return Promise.reject(new Error('scale must be a Number'));
     }
-    printSettings.scaleFactor = options.scale;
+    printSettings.scale = options.scale;
   }
 
   const { pageSize } = options;
@@ -271,7 +296,7 @@ WebContents.prototype.printToPDF = async function (options) {
 
   if (options.pageRanges !== undefined) {
     if (typeof options.pageRanges !== 'string') {
-      return Promise.reject(new Error('printBackground must be a String'));
+      return Promise.reject(new Error('pageRanges must be a String'));
     }
     printSettings.pageRanges = options.pageRanges;
   }
@@ -393,10 +418,6 @@ WebContents.prototype.loadFile = function (filePath, options = {}) {
 };
 
 WebContents.prototype.loadURL = function (url, options) {
-  if (!options) {
-    options = {};
-  }
-
   const p = new Promise<void>((resolve, reject) => {
     const resolveAndCleanup = () => {
       removeListeners();
@@ -449,20 +470,21 @@ WebContents.prototype.loadURL = function (url, options) {
     const removeListeners = () => {
       this.removeListener('did-finish-load', finishListener);
       this.removeListener('did-fail-load', failListener);
+      this.removeListener('did-navigate-in-page', finishListener);
       this.removeListener('did-start-navigation', navigationListener);
       this.removeListener('did-stop-loading', stopLoadingListener);
       this.removeListener('destroyed', stopLoadingListener);
     };
     this.on('did-finish-load', finishListener);
     this.on('did-fail-load', failListener);
+    this.on('did-navigate-in-page', finishListener);
     this.on('did-start-navigation', navigationListener);
     this.on('did-stop-loading', stopLoadingListener);
     this.on('destroyed', stopLoadingListener);
   });
   // Add a no-op rejection handler to silence the unhandled rejection error.
   p.catch(() => {});
-  this._loadURL(url, options);
-  this.emit('load-url', url, options);
+  this._loadURL(url, options ?? {});
   return p;
 };
 
@@ -522,7 +544,8 @@ const addReplyToEvent = (event: Electron.IpcMainEvent) => {
   };
 };
 
-const addSenderFrameToEvent = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => {
+const addSenderToEvent = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, sender: Electron.WebContents) => {
+  event.sender = sender;
   const { processId, frameId } = event;
   Object.defineProperty(event, 'senderFrame', {
     get: () => webFrameMain.fromId(processId, frameId)
@@ -531,9 +554,14 @@ const addSenderFrameToEvent = (event: Electron.IpcMainEvent | Electron.IpcMainIn
 
 const addReturnValueToEvent = (event: Electron.IpcMainEvent) => {
   Object.defineProperty(event, 'returnValue', {
-    set: (value) => event.sendReply(value),
+    set: (value) => event._replyChannel.sendReply(value),
     get: () => {}
   });
+};
+
+const getWebFrameForEvent = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => {
+  if (!event.processId || !event.frameId) return null;
+  return webFrameMainBinding.fromIdOrNull(event.processId, event.frameId);
 };
 
 const commandLine = process._linkedBinding('electron_common_command_line');
@@ -567,44 +595,49 @@ WebContents.prototype._init = function () {
 
   // Dispatch IPC messages to the ipc module.
   this.on('-ipc-message' as any, function (this: Electron.WebContents, event: Electron.IpcMainEvent, internal: boolean, channel: string, args: any[]) {
-    addSenderFrameToEvent(event);
+    addSenderToEvent(event, this);
     if (internal) {
       ipcMainInternal.emit(channel, event, ...args);
     } else {
       addReplyToEvent(event);
       this.emit('ipc-message', event, channel, ...args);
-      const maybeWebFrame = webFrameMainBinding.fromIdOrNull(event.processId, event.frameId);
+      const maybeWebFrame = getWebFrameForEvent(event);
       maybeWebFrame && maybeWebFrame.ipc.emit(channel, event, ...args);
       ipc.emit(channel, event, ...args);
       ipcMain.emit(channel, event, ...args);
     }
   });
 
-  this.on('-ipc-invoke' as any, function (event: Electron.IpcMainInvokeEvent, internal: boolean, channel: string, args: any[]) {
-    addSenderFrameToEvent(event);
-    event._reply = (result: any) => event.sendReply({ result });
-    event._throw = (error: Error) => {
+  this.on('-ipc-invoke' as any, async function (this: Electron.WebContents, event: Electron.IpcMainInvokeEvent, internal: boolean, channel: string, args: any[]) {
+    addSenderToEvent(event, this);
+    const replyWithResult = (result: any) => event._replyChannel.sendReply({ result });
+    const replyWithError = (error: Error) => {
       console.error(`Error occurred in handler for '${channel}':`, error);
-      event.sendReply({ error: error.toString() });
+      event._replyChannel.sendReply({ error: error.toString() });
     };
-    const maybeWebFrame = webFrameMainBinding.fromIdOrNull(event.processId, event.frameId);
-    const targets: (ElectronInternal.IpcMainInternal| undefined)[] = internal ? [ipcMainInternal] : [maybeWebFrame && maybeWebFrame.ipc, ipc, ipcMain];
+    const maybeWebFrame = getWebFrameForEvent(event);
+    const targets: (ElectronInternal.IpcMainInternal| undefined)[] = internal ? [ipcMainInternal] : [maybeWebFrame?.ipc, ipc, ipcMain];
     const target = targets.find(target => target && (target as any)._invokeHandlers.has(channel));
     if (target) {
-      (target as any)._invokeHandlers.get(channel)(event, ...args);
+      const handler = (target as any)._invokeHandlers.get(channel);
+      try {
+        replyWithResult(await Promise.resolve(handler(event, ...args)));
+      } catch (err) {
+        replyWithError(err as Error);
+      }
     } else {
-      event._throw(`No handler registered for '${channel}'`);
+      replyWithError(new Error(`No handler registered for '${channel}'`));
     }
   });
 
   this.on('-ipc-message-sync' as any, function (this: Electron.WebContents, event: Electron.IpcMainEvent, internal: boolean, channel: string, args: any[]) {
-    addSenderFrameToEvent(event);
+    addSenderToEvent(event, this);
     addReturnValueToEvent(event);
     if (internal) {
       ipcMainInternal.emit(channel, event, ...args);
     } else {
       addReplyToEvent(event);
-      const maybeWebFrame = webFrameMainBinding.fromIdOrNull(event.processId, event.frameId);
+      const maybeWebFrame = getWebFrameForEvent(event);
       if (this.listenerCount('ipc-message-sync') === 0 && ipc.listenerCount(channel) === 0 && ipcMain.listenerCount(channel) === 0 && (!maybeWebFrame || maybeWebFrame.ipc.listenerCount(channel) === 0)) {
         console.warn(`WebContents #${this.id} called ipcRenderer.sendSync() with '${channel}' channel without listeners.`);
       }
@@ -615,12 +648,12 @@ WebContents.prototype._init = function () {
     }
   });
 
-  this.on('-ipc-ports' as any, function (event: Electron.IpcMainEvent, internal: boolean, channel: string, message: any, ports: any[]) {
-    addSenderFrameToEvent(event);
+  this.on('-ipc-ports' as any, function (this: Electron.WebContents, event: Electron.IpcMainEvent, internal: boolean, channel: string, message: any, ports: any[]) {
+    addSenderToEvent(event, this);
     event.ports = ports.map(p => new MessagePortMain(p));
-    ipc.emit(channel, event, message);
-    const maybeWebFrame = webFrameMainBinding.fromIdOrNull(event.processId, event.frameId);
+    const maybeWebFrame = getWebFrameForEvent(event);
     maybeWebFrame && maybeWebFrame.ipc.emit(channel, event, message);
+    ipc.emit(channel, event, message);
     ipcMain.emit(channel, event, message);
   });
 
@@ -644,7 +677,7 @@ WebContents.prototype._init = function () {
 
   if (this.getType() !== 'remote') {
     // Make new windows requested by links behave like "window.open".
-    this.on('-new-window' as any, (event: ElectronInternal.Event, url: string, frameName: string, disposition: Electron.HandlerDetails['disposition'],
+    this.on('-new-window' as any, (event: Electron.Event, url: string, frameName: string, disposition: Electron.HandlerDetails['disposition'],
       rawFeatures: string, referrer: Electron.Referrer, postData: PostData) => {
       const postBody = postData ? {
         data: postData,
@@ -670,7 +703,7 @@ WebContents.prototype._init = function () {
       const options = result.browserWindowConstructorOptions;
       if (!event.defaultPrevented) {
         openGuestWindow({
-          embedder: event.sender,
+          embedder: this,
           disposition,
           referrer,
           postData,
@@ -683,7 +716,7 @@ WebContents.prototype._init = function () {
 
     let windowOpenOverriddenOptions: BrowserWindowConstructorOptions | null = null;
     let windowOpenOutlivesOpenerOption: boolean = false;
-    this.on('-will-add-new-contents' as any, (event: ElectronInternal.Event, url: string, frameName: string, rawFeatures: string, disposition: Electron.HandlerDetails['disposition'], referrer: Electron.Referrer, postData: PostData) => {
+    this.on('-will-add-new-contents' as any, (event: Electron.Event, url: string, frameName: string, rawFeatures: string, disposition: Electron.HandlerDetails['disposition'], referrer: Electron.Referrer, postData: PostData) => {
       const postBody = postData ? {
         data: postData,
         ...parseContentTypeFormat(postData)
@@ -718,7 +751,7 @@ WebContents.prototype._init = function () {
         } : undefined;
         const { webPreferences: parsedWebPreferences } = parseFeatures(rawFeatures);
         const webPreferences = makeWebPreferences({
-          embedder: event.sender,
+          embedder: this,
           insecureParsedWebPreferences: parsedWebPreferences,
           secureOverrideWebPreferences
         });
@@ -731,7 +764,7 @@ WebContents.prototype._init = function () {
     });
 
     // Create a new browser window for "window.open"
-    this.on('-add-new-contents' as any, (event: ElectronInternal.Event, webContents: Electron.WebContents, disposition: string,
+    this.on('-add-new-contents' as any, (event: Electron.Event, webContents: Electron.WebContents, disposition: string,
       _userGesture: boolean, _left: number, _top: number, _width: number, _height: number, url: string, frameName: string,
       referrer: Electron.Referrer, rawFeatures: string, postData: PostData) => {
       const overriddenOptions = windowOpenOverriddenOptions || undefined;
@@ -747,7 +780,7 @@ WebContents.prototype._init = function () {
       }
 
       openGuestWindow({
-        embedder: event.sender,
+        embedder: this,
         guest: webContents,
         overrideBrowserWindowOptions: overriddenOptions,
         disposition,
@@ -784,8 +817,7 @@ WebContents.prototype._init = function () {
     }
   });
 
-  const event = process._linkedBinding('electron_browser_event').createEmpty();
-  app.emit('web-contents-created', event, this);
+  app.emit('web-contents-created', { sender: this, preventDefault () {}, get defaultPrevented () { return false; } }, this);
 
   // Properties
 
@@ -827,6 +859,10 @@ export function create (options = {}): Electron.WebContents {
 
 export function fromId (id: string) {
   return binding.fromId(id);
+}
+
+export function fromFrame (frame: Electron.WebFrameMain) {
+  return binding.fromFrame(frame);
 }
 
 export function fromDevToolsTargetId (targetId: string) {

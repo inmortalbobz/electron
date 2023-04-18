@@ -43,12 +43,15 @@ class MenuBar : public views::AccessiblePaneView,
   void ActivateAccelerator(char16_t key);
 
   // Returns there are how many items in the root menu.
-  int GetItemCount() const;
+  size_t GetItemCount() const;
 
   // Get the menu under specified screen point.
   bool GetMenuButtonFromScreenPoint(const gfx::Point& point,
                                     ElectronMenuModel** menu_model,
                                     views::MenuButton** button);
+
+  void ViewHierarchyChanged(
+      const views::ViewHierarchyChangedDetails& details) override;
 
  private:
   // MenuDelegate::Observer:
@@ -71,7 +74,7 @@ class MenuBar : public views::AccessiblePaneView,
   const char* GetClassName() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
-  void ButtonPressed(int id, const ui::Event& event);
+  void ButtonPressed(size_t id, const ui::Event& event);
 
   void RebuildChildren();
   void UpdateViewColors();

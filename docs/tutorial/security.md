@@ -9,7 +9,7 @@ toc_max_heading_level: 3
 
 :::info Reporting security issues
 For information on how to properly disclose an Electron vulnerability,
-see [SECURITY.md](https://github.com/electron/electron/tree/main/SECURITY.md).
+see [SECURITY.md](https://github.com/electron/electron/blob/main/SECURITY.md).
 
 For upstream Chromium vulnerabilities: Electron keeps up to date with alternating
 Chromium releases. For more information, see the
@@ -44,7 +44,7 @@ your responsibility to ensure that the code is not malicious.
 
 It is important to remember that the security of your Electron application is
 the result of the overall security of the framework foundation
-(*Chromium*, *Node.js*), Electron itself, all NPM dependencies and
+(_Chromium_, _Node.js_), Electron itself, all NPM dependencies and
 your code. As such, it is your responsibility to follow a few important best
 practices:
 
@@ -52,7 +52,7 @@ practices:
 When releasing your product, you’re also shipping a bundle composed of Electron,
 Chromium shared library and Node.js. Vulnerabilities affecting these components
 may impact the security of your application. By updating Electron to the latest
-version, you ensure that critical vulnerabilities (such as *nodeIntegration bypasses*)
+version, you ensure that critical vulnerabilities (such as _nodeIntegration bypasses_)
 are already patched and cannot be exploited in your application. For more information,
 see "[Use a current version of Electron](#16-use-a-current-version-of-electron)".
 
@@ -113,6 +113,7 @@ You should at least follow these steps to improve the security of your applicati
 14. [Disable or limit creation of new windows](#14-disable-or-limit-creation-of-new-windows)
 15. [Do not use `shell.openExternal` with untrusted content](#15-do-not-use-shellopenexternal-with-untrusted-content)
 16. [Use a current version of Electron](#16-use-a-current-version-of-electron)
+17. [Validate the `sender` of all IPC messages](#17-validate-the-sender-of-all-ipc-messages)
 
 To automate the detection of misconfigurations and insecure patterns, it is
 possible to use
@@ -130,10 +131,8 @@ like `HTTP`. Similarly, we recommend the use of `WSS` over `WS`, `FTPS` over
 
 #### Why?
 
-`HTTPS` has three main benefits:
+`HTTPS` has two main benefits:
 
-1. It authenticates the remote server, ensuring your app connects to the correct
-   host instead of an impersonator.
 1. It ensures data integrity, asserting that the data was not modified while in
    transit between your application and the host.
 1. It encrypts the traffic between your user and the destination host, making it
@@ -256,7 +255,7 @@ the sandbox in all renderers. Loading, reading or processing any untrusted
 content in an unsandboxed process, including the main process, is not advised.
 
 :::info
-For more information on what `contextIsolation` is and how to enable it please
+For more information on what Process Sandboxing is and how to enable it please
 see our dedicated [Process Sandboxing](sandbox.md) document.
 :::info
 

@@ -17,7 +17,6 @@
 #include "chrome/browser/devtools/devtools_eye_dropper.h"
 #include "chrome/browser/devtools/devtools_file_system_indexer.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"  // nogncheck
-#include "content/common/cursors/webcursor.h"
 #include "content/common/frame.mojom.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
@@ -42,10 +41,12 @@
 #include "shell/common/gin_helper/constructible.h"
 #include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_helper/pinnable.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/image/image.h"
 
 #if BUILDFLAG(ENABLE_PRINTING)
+#include "components/printing/browser/print_to_pdf/pdf_print_result.h"
 #include "shell/browser/printing/print_view_manager_electron.h"
 #endif
 
@@ -76,6 +77,8 @@ class Arguments;
 
 class ExclusiveAccessManager;
 
+class SkRegion;
+
 namespace electron {
 
 class ElectronBrowserContext;
@@ -103,6 +106,7 @@ class WebContents : public ExclusiveAccessContext,
                     public gin_helper::CleanedUpAtExit,
                     public content::WebContentsObserver,
                     public content::WebContentsDelegate,
+                    public content::RenderWidgetHost::InputEventObserver,
                     public InspectableWebContentsDelegate,
                     public InspectableWebContentsViewDelegate {
  public:
@@ -146,12 +150,11 @@ class WebContents : public ExclusiveAccessContext,
 
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
-  static v8::Local<v8::ObjectTemplate> FillObjectTemplate(
-      v8::Isolate*,
-      v8::Local<v8::ObjectTemplate>);
+  static void FillObjectTemplate(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
   const char* GetTypeName() override;
 
   void Destroy();
+  void Close(absl::optional<gin_helper::Dictionary> options);
   base::WeakPtr<WebContents> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
   bool GetBackgroundThrottling() const;
@@ -210,8 +213,6 @@ class WebContents : public ExclusiveAccessContext,
   void SetEmbedder(const WebContents* embedder);
   void SetDevToolsWebContents(const WebContents* devtools);
   v8::Local<v8::Value> GetNativeView(v8::Isolate* isolate) const;
-  void IncrementCapturerCount(gin::Arguments* args);
-  void DecrementCapturerCount(gin::Arguments* args);
   bool IsBeingCaptured();
   void HandleNewRenderFrame(content::RenderFrameHost* render_frame_host);
 
@@ -225,7 +226,7 @@ class WebContents : public ExclusiveAccessContext,
   // Print current page as PDF.
   v8::Local<v8::Promise> PrintToPDF(const base::Value& settings);
   void OnPDFCreated(gin_helper::Promise<v8::Local<v8::Value>> promise,
-                    PrintViewManagerElectron::PrintResult print_result,
+                    print_to_pdf::PdfPrintResult print_result,
                     scoped_refptr<base::RefCountedMemory> data);
 #endif
 
@@ -332,6 +333,7 @@ class WebContents : public ExclusiveAccessContext,
   v8::Local<v8::Value> DevToolsWebContents(v8::Isolate* isolate);
   v8::Local<v8::Value> Debugger(v8::Isolate* isolate);
   content::RenderFrameHost* MainFrame();
+  content::RenderFrameHost* Opener();
 
   WebContentsZoomController* GetZoomController() { return zoom_controller_; }
 
@@ -350,19 +352,25 @@ class WebContents : public ExclusiveAccessContext,
   // this.emit(name, new Event(sender, message), args...);
   template <typename... Args>
   bool EmitWithSender(base::StringPiece name,
-                      content::RenderFrameHost* sender,
+                      content::RenderFrameHost* frame,
                       electron::mojom::ElectronApiIPC::InvokeCallback callback,
                       Args&&... args) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
     v8::HandleScope handle_scope(isolate);
-    v8::Local<v8::Object> wrapper;
-    if (!GetWrapper(isolate).ToLocal(&wrapper))
+
+    gin::Handle<gin_helper::internal::Event> event =
+        MakeEventWithSender(isolate, frame, std::move(callback));
+    if (event.IsEmpty())
       return false;
-    v8::Local<v8::Object> event = gin_helper::internal::CreateNativeEvent(
-        isolate, wrapper, sender, std::move(callback));
-    return EmitCustomEvent(name, event, std::forward<Args>(args)...);
+    EmitWithoutEvent(name, event, std::forward<Args>(args)...);
+    return event->GetDefaultPrevented();
   }
+
+  gin::Handle<gin_helper::internal::Event> MakeEventWithSender(
+      v8::Isolate* isolate,
+      content::RenderFrameHost* frame,
+      electron::mojom::ElectronApiIPC::InvokeCallback callback);
 
   WebContents* embedder() { return embedder_; }
 
@@ -431,6 +439,17 @@ class WebContents : public ExclusiveAccessContext,
 
   void SetImageAnimationPolicy(const std::string& new_policy);
 
+  // content::RenderWidgetHost::InputEventObserver:
+  void OnInputEvent(const blink::WebInputEvent& event) override;
+
+  SkRegion* draggable_region() {
+    return force_non_draggable_ ? nullptr : draggable_region_.get();
+  }
+
+  void SetForceNonDraggable(bool force_non_draggable) {
+    force_non_draggable_ = force_non_draggable;
+  }
+
   // disable copy
   WebContents(const WebContents&) = delete;
   WebContents& operator=(const WebContents&) = delete;
@@ -497,7 +516,7 @@ class WebContents : public ExclusiveAccessContext,
                       std::unique_ptr<content::WebContents> new_contents,
                       const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool user_gesture,
                       bool* was_blocked) override;
   content::WebContents* OpenURLFromTab(
@@ -534,7 +553,6 @@ class WebContents : public ExclusiveAccessContext,
       content::RenderWidgetHost* render_widget_host) override;
   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                          const content::ContextMenuParams& params) override;
-  bool OnGoToEntryOffset(int offset) override;
   void FindReply(content::WebContents* web_contents,
                  int request_id,
                  int number_of_matches,
@@ -566,8 +584,7 @@ class WebContents : public ExclusiveAccessContext,
                            const gfx::Size& pref_size) override;
 
   // content::WebContentsObserver:
-  void BeforeUnloadFired(bool proceed,
-                         const base::TimeTicks& proceed_time) override;
+  void BeforeUnloadFired(bool proceed) override;
   void OnBackgroundColorChanged() override;
   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
@@ -609,7 +626,7 @@ class WebContents : public ExclusiveAccessContext,
       const content::MediaPlayerId& id,
       content::WebContentsObserver::MediaStoppedReason reason) override;
   void DidChangeThemeColor() override;
-  void OnCursorChanged(const content::WebCursor& cursor) override;
+  void OnCursorChanged(const ui::Cursor& cursor) override;
   void DidAcquireFullscreen(content::RenderFrameHost* rfh) override;
   void OnWebContentsFocused(
       content::RenderWidgetHost* render_widget_host) override;
@@ -665,6 +682,7 @@ class WebContents : public ExclusiveAccessContext,
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type,
       ExclusiveAccessBubbleHideCallback bubble_first_hide_callback,
+      bool notify_download,
       bool force_update) override;
   void OnExclusiveAccessUserInput() override;
   content::WebContents* GetActiveWebContents() override;
@@ -691,6 +709,7 @@ class WebContents : public ExclusiveAccessContext,
   void DevToolsIndexPath(int request_id,
                          const std::string& file_system_path,
                          const std::string& excluded_folders_message) override;
+  void DevToolsOpenInNewTab(const std::string& url) override;
   void DevToolsStopIndexing(int request_id) override;
   void DevToolsSearchInPath(int request_id,
                             const std::string& file_system_path,
@@ -809,6 +828,10 @@ class WebContents : public ExclusiveAccessContext,
 
   // Stores the frame thats currently in fullscreen, nullptr if there is none.
   content::RenderFrameHost* fullscreen_frame_ = nullptr;
+
+  std::unique_ptr<SkRegion> draggable_region_;
+
+  bool force_non_draggable_ = false;
 
   base::WeakPtrFactory<WebContents> weak_factory_{this};
 };

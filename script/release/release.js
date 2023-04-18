@@ -12,9 +12,8 @@ const args = require('minimist')(process.argv.slice(2), {
 const fs = require('fs');
 const { execSync } = require('child_process');
 const got = require('got');
-const pkg = require('../../package.json');
-const pkgVersion = `v${pkg.version}`;
 const path = require('path');
+const semver = require('semver');
 const temp = require('temp').track();
 const { URL } = require('url');
 const { BlobServiceClient } = require('@azure/storage-blob');
@@ -25,7 +24,10 @@ const pass = '✓'.green;
 const fail = '✗'.red;
 
 const { ELECTRON_DIR } = require('../lib/utils');
+const { getElectronVersion } = require('../lib/get-version');
 const getUrlHash = require('./get-url-hash');
+
+const pkgVersion = `v${getElectronVersion()}`;
 
 const octokit = new Octokit({
   auth: process.env.ELECTRON_GITHUB_TOKEN
@@ -316,12 +318,23 @@ function saveShaSumFile (checksums, fileName) {
 }
 
 async function publishRelease (release) {
+  let makeLatest = false;
+  if (!release.prerelease) {
+    const currentLatest = await octokit.repos.getLatestRelease({
+      owner: 'electron',
+      repo: targetRepo
+    });
+
+    makeLatest = semver.gte(release.tag_name, currentLatest.data.tag_name);
+  }
+
   return octokit.repos.updateRelease({
     owner: 'electron',
     repo: targetRepo,
     release_id: release.id,
     tag_name: release.tag_name,
-    draft: false
+    draft: false,
+    make_latest: makeLatest ? 'true' : 'false'
   }).catch(err => {
     console.log(`${fail} Error publishing release:`, err);
     process.exit(1);

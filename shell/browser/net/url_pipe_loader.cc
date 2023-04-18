@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/task/sequenced_task_runner.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/string_data_source.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -25,7 +26,7 @@ URLPipeLoader::URLPipeLoader(
       &URLPipeLoader::NotifyComplete, base::Unretained(this), net::ERR_FAILED));
 
   // PostTask since it might destruct.
-  base::SequencedTaskRunnerHandle::Get()->PostTask(
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&URLPipeLoader::Start, weak_factory_.GetWeakPtr(), factory,
                      std::move(request), annotation, std::move(upload_data)));
@@ -70,7 +71,8 @@ void URLPipeLoader::OnResponseStarted(
 
   producer_ = std::make_unique<mojo::DataPipeProducer>(std::move(producer));
 
-  client_->OnReceiveResponse(response_head.Clone(), std::move(consumer));
+  client_->OnReceiveResponse(response_head.Clone(), std::move(consumer),
+                             absl::nullopt);
 }
 
 void URLPipeLoader::OnWrite(base::OnceClosure resume, MojoResult result) {

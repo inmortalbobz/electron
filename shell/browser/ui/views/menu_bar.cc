@@ -35,12 +35,11 @@ const char MenuBar::kViewClassName[] = "ElectronMenuBar";
 MenuBar::MenuBar(NativeWindow* window, RootView* root_view)
     : background_color_(kDefaultColor), window_(window), root_view_(root_view) {
   const ui::NativeTheme* theme = root_view_->GetNativeTheme();
-  RefreshColorCache(theme);
-  UpdateViewColors();
 #if BUILDFLAG(IS_WIN)
   SetBackground(views::CreateThemedSolidBackground(ui::kColorMenuBackground));
-  background_color_ = GetBackground()->get_color();
 #endif
+  RefreshColorCache(theme);
+  UpdateViewColors();
   SetFocusBehavior(FocusBehavior::ALWAYS);
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal));
@@ -81,7 +80,7 @@ void MenuBar::ActivateAccelerator(char16_t key) {
     static_cast<SubmenuButton*>(child)->Activate(nullptr);
 }
 
-int MenuBar::GetItemCount() const {
+size_t MenuBar::GetItemCount() const {
   return menu_model_ ? menu_model_->GetItemCount() : 0;
 }
 
@@ -92,7 +91,7 @@ bool MenuBar::GetMenuButtonFromScreenPoint(const gfx::Point& screenPoint,
     return false;
 
   auto children = GetChildrenInZOrder();
-  for (int i = 0, n = children.size(); i < n; ++i) {
+  for (size_t i = 0, n = children.size(); i < n; ++i) {
     if (children[i]->GetBoundsInScreen().Contains(screenPoint) &&
         (menu_model_->GetTypeAt(i) == ElectronMenuModel::TYPE_SUBMENU)) {
       *menu_model = menu_model_->GetSubmenuModelAt(i);
@@ -174,7 +173,7 @@ const char* MenuBar::GetClassName() const {
   return kViewClassName;
 }
 
-void MenuBar::ButtonPressed(int id, const ui::Event& event) {
+void MenuBar::ButtonPressed(size_t id, const ui::Event& event) {
   // Hide the accelerator when a submenu is activated.
   SetAcceleratorVisibility(pane_has_focus());
 
@@ -193,7 +192,8 @@ void MenuBar::ButtonPressed(int id, const ui::Event& event) {
   SubmenuButton* source = nullptr;
   for (auto* child : children()) {
     auto* button = static_cast<SubmenuButton*>(child);
-    if (button->GetID() == id) {
+    int button_id = button->GetID();
+    if (button_id >= 0 && static_cast<size_t>(button_id) == id) {
       source = button;
       break;
     }
@@ -208,6 +208,14 @@ void MenuBar::ButtonPressed(int id, const ui::Event& event) {
   menu_delegate->AddObserver(this);
 }
 
+void MenuBar::ViewHierarchyChanged(
+    const views::ViewHierarchyChangedDetails& details) {
+  views::AccessiblePaneView::ViewHierarchyChanged(details);
+#if BUILDFLAG(IS_WIN)
+  background_color_ = GetBackground()->get_color();
+#endif
+}
+
 void MenuBar::RefreshColorCache(const ui::NativeTheme* theme) {
   if (theme) {
 #if BUILDFLAG(IS_LINUX)
@@ -216,13 +224,15 @@ void MenuBar::RefreshColorCache(const ui::NativeTheme* theme) {
         gtk::GetFgColor("GtkMenuBar#menubar GtkMenuItem#menuitem GtkLabel");
     disabled_color_ = gtk::GetFgColor(
         "GtkMenuBar#menubar GtkMenuItem#menuitem:disabled GtkLabel");
+#elif BUILDFLAG(IS_WIN)
+    background_color_ = GetBackground()->get_color();
 #endif
   }
 }
 
 void MenuBar::RebuildChildren() {
   RemoveAllChildViews();
-  for (int i = 0, n = GetItemCount(); i < n; ++i) {
+  for (size_t i = 0, n = GetItemCount(); i < n; ++i) {
     auto* button = new SubmenuButton(
         base::BindRepeating(&MenuBar::ButtonPressed, base::Unretained(this), i),
         menu_model_->GetLabelAt(i), background_color_);

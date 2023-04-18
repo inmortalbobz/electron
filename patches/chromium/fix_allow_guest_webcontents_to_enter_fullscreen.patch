@@ -6,15 +6,15 @@ Subject: fix: allow guest webcontents to enter fullscreen
 This can be upstreamed, a guest webcontents can't technically become the focused webContents. This DCHECK should allow all guest webContents to request fullscreen entrance.
 
 diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
-index 6f01f3eb8df96320700448e4583e4a4a0b3d2beb..e3c9f87e651be09fd40f1f51b3f9ba6fb18a770b 100644
+index 1b08ec595adb6285f4c4d51d7d4745686c83a7db..c3996a52a1bc149c77fb81b2e6261a4e3f9fe35e 100644
 --- a/content/browser/web_contents/web_contents_impl.cc
 +++ b/content/browser/web_contents/web_contents_impl.cc
-@@ -3447,7 +3447,7 @@ void WebContentsImpl::EnterFullscreenMode(
+@@ -3588,7 +3588,7 @@ void WebContentsImpl::EnterFullscreenMode(
    OPTIONAL_TRACE_EVENT0("content", "WebContentsImpl::EnterFullscreenMode");
    DCHECK(CanEnterFullscreenMode(requesting_frame, options));
    DCHECK(requesting_frame->IsActive());
 -  DCHECK(ContainsOrIsFocusedWebContents());
 +  DCHECK(ContainsOrIsFocusedWebContents() || IsGuest());
  
-   if (delegate_) {
-     delegate_->EnterFullscreenModeForTab(requesting_frame, options);
+   // When WebView is the `delegate_` we can end up with VisualProperties changes
+   // synchronously. Notify the view ahead so it can handle the transition.

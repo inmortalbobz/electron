@@ -8,6 +8,7 @@
 #include <objc/objc-runtime.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_media_id.h"
+#include "shell/browser/browser.h"
 #include "shell/browser/javascript_environment.h"
 #include "shell/browser/native_browser_view_mac.h"
 #include "shell/browser/ui/cocoa/electron_native_widget_mac.h"
@@ -31,8 +33,8 @@
 #include "shell/browser/ui/cocoa/electron_touch_bar.h"
 #include "shell/browser/ui/cocoa/root_view_mac.h"
 #include "shell/browser/ui/cocoa/window_buttons_proxy.h"
+#include "shell/browser/ui/drag_util.h"
 #include "shell/browser/ui/inspectable_web_contents.h"
-#include "shell/browser/ui/inspectable_web_contents_view.h"
 #include "shell/browser/window_list.h"
 #include "shell/common/gin_converters/gfx_converter.h"
 #include "shell/common/gin_helper/dictionary.h"
@@ -40,88 +42,16 @@
 #include "shell/common/options_switches.h"
 #include "shell/common/process_util.h"
 #include "skia/ext/skia_utils_mac.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/webrtc/modules/desktop_capture/mac/window_list_utils.h"
+#include "ui/base/hit_test.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gl/gpu_switching_manager.h"
 #include "ui/views/background.h"
 #include "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 #include "ui/views/widget/widget.h"
-
-// This view would inform Chromium to resize the hosted views::View.
-//
-// The overridden methods should behave the same with BridgedContentView.
-@interface ElectronAdaptedContentView : NSView {
- @private
-  views::NativeWidgetMacNSWindowHost* bridge_host_;
-}
-@end
-
-@implementation ElectronAdaptedContentView
-
-- (id)initWithShell:(electron::NativeWindowMac*)shell {
-  if ((self = [self init])) {
-    bridge_host_ = views::NativeWidgetMacNSWindowHost::GetFromNativeWindow(
-        shell->GetNativeWindow());
-  }
-  return self;
-}
-
-- (void)viewDidMoveToWindow {
-  // When this view is added to a window, AppKit calls setFrameSize before it is
-  // added to the window, so the behavior in setFrameSize is not triggered.
-  NSWindow* window = [self window];
-  if (window)
-    [self setFrameSize:NSZeroSize];
-}
-
-- (void)setFrameSize:(NSSize)newSize {
-  // The size passed in here does not always use
-  // -[NSWindow contentRectForFrameRect]. The following ensures that the
-  // contentView for a frameless window can extend over the titlebar of the new
-  // window containing it, since AppKit requires a titlebar to give frameless
-  // windows correct shadows and rounded corners.
-  NSWindow* window = [self window];
-  if (window && [window contentView] == self) {
-    newSize = [window contentRectForFrameRect:[window frame]].size;
-    // Ensure that the window geometry be updated on the host side before the
-    // view size is updated.
-    bridge_host_->GetInProcessNSWindowBridge()->UpdateWindowGeometry();
-  }
-
-  [super setFrameSize:newSize];
-
-  // The OnViewSizeChanged is marked private in derived class.
-  static_cast<remote_cocoa::mojom::NativeWidgetNSWindowHost*>(bridge_host_)
-      ->OnViewSizeChanged(gfx::Size(newSize.width, newSize.height));
-}
-
-@end
-
-// This view always takes the size of its superview. It is intended to be used
-// as a NSWindow's contentView.  It is needed because NSWindow's implementation
-// explicitly resizes the contentView at inopportune times.
-@interface FullSizeContentView : NSView
-@end
-
-@implementation FullSizeContentView
-
-// This method is directly called by NSWindow during a window resize on OSX
-// 10.10.0, beta 2. We must override it to prevent the content view from
-// shrinking.
-- (void)setFrameSize:(NSSize)size {
-  if ([self superview])
-    size = [[self superview] bounds].size;
-  [super setFrameSize:size];
-}
-
-// The contentView gets moved around during certain full-screen operations.
-// This is less than ideal, and should eventually be removed.
-- (void)viewDidMoveToSuperview {
-  [self setFrame:[[self superview] bounds]];
-}
-
-@end
+#include "ui/views/window/native_frame_view_mac.h"
 
 @interface ElectronProgressBar : NSProgressIndicator
 @end
@@ -280,6 +210,9 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
   std::string windowType;
   options.Get(options::kType, &windowType);
 
+  bool hiddenInMissionControl = false;
+  options.Get(options::kHiddenInMissionControl, &hiddenInMissionControl);
+
   bool useStandardWindow = true;
   // eventually deprecate separate "standardWindow" option in favor of
   // standard / textured window types
@@ -294,12 +227,12 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
 
   NSUInteger styleMask = NSWindowStyleMaskTitled;
 
-  // Removing NSWindowStyleMaskTitled removes window title, which removes
-  // rounded corners of window.
+  // The NSWindowStyleMaskFullSizeContentView style removes rounded corners
+  // for frameless window.
   bool rounded_corner = true;
   options.Get(options::kRoundedCorners, &rounded_corner);
   if (!rounded_corner && !has_frame())
-    styleMask = 0;
+    styleMask = NSWindowStyleMaskBorderless;
 
   if (minimizable)
     styleMask |= NSWindowStyleMaskMiniaturizable;
@@ -418,31 +351,7 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
   options.Get(options::kDisableAutoHideCursor, &disableAutoHideCursor);
   [window_ setDisableAutoHideCursor:disableAutoHideCursor];
 
-  // Use an NSEvent monitor to listen for the wheel event.
-  BOOL __block began = NO;
-  wheel_event_monitor_ = [NSEvent
-      addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
-                                   handler:^(NSEvent* event) {
-                                     if ([[event window] windowNumber] !=
-                                         [window_ windowNumber])
-                                       return event;
-
-                                     if (!began && (([event phase] ==
-                                                     NSEventPhaseMayBegin) ||
-                                                    ([event phase] ==
-                                                     NSEventPhaseBegan))) {
-                                       this->NotifyWindowScrollTouchBegin();
-                                       began = YES;
-                                     } else if (began &&
-                                                (([event phase] ==
-                                                  NSEventPhaseEnded) ||
-                                                 ([event phase] ==
-                                                  NSEventPhaseCancelled))) {
-                                       this->NotifyWindowScrollTouchEnd();
-                                       began = NO;
-                                     }
-                                     return event;
-                                   }];
+  SetHiddenInMissionControl(hiddenInMissionControl);
 
   // Set maximizable state last to ensure zoom button does not get reset
   // by calls to other APIs.
@@ -691,6 +600,9 @@ bool NativeWindowMac::HandleDeferredClose() {
 }
 
 void NativeWindowMac::SetFullScreen(bool fullscreen) {
+  if (!has_frame() && !HasStyleMask(NSWindowStyleMaskTitled))
+    return;
+
   // [NSWindow -toggleFullScreen] is an asynchronous operation, which means
   // that it's possible to call it while a fullscreen transition is currently
   // in process. This can create weird behavior (incl. phantom windows),
@@ -708,7 +620,7 @@ void NativeWindowMac::SetFullScreen(bool fullscreen) {
     return;
   }
 
-  if (fullscreen == IsFullscreen())
+  if (fullscreen == IsFullscreen() || !IsFullScreenable())
     return;
 
   // Take note of the current window size
@@ -1119,9 +1031,12 @@ void NativeWindowMac::SetKiosk(bool kiosk) {
     is_kiosk_ = true;
     SetFullScreen(true);
   } else if (!kiosk && is_kiosk_) {
-    [NSApp setPresentationOptions:kiosk_options_];
     is_kiosk_ = false;
     SetFullScreen(false);
+
+    // Set presentation options *after* asynchronously exiting
+    // fullscreen to ensure they take effect.
+    [NSApp setPresentationOptions:kiosk_options_];
   }
 }
 
@@ -1148,6 +1063,10 @@ void NativeWindowMac::SetHasShadow(bool has_shadow) {
 
 bool NativeWindowMac::HasShadow() {
   return [window_ hasShadow];
+}
+
+void NativeWindowMac::InvalidateShadow() {
+  [window_ invalidateShadow];
 }
 
 void NativeWindowMac::SetOpacity(const double opacity) {
@@ -1179,9 +1098,17 @@ bool NativeWindowMac::IsDocumentEdited() {
   return [window_ isDocumentEdited];
 }
 
+bool NativeWindowMac::IsHiddenInMissionControl() {
+  NSUInteger collectionBehavior = [window_ collectionBehavior];
+  return collectionBehavior & NSWindowCollectionBehaviorTransient;
+}
+
+void NativeWindowMac::SetHiddenInMissionControl(bool hidden) {
+  SetCollectionBehavior(hidden, NSWindowCollectionBehaviorTransient);
+}
+
 void NativeWindowMac::SetIgnoreMouseEvents(bool ignore, bool forward) {
   [window_ setIgnoresMouseEvents:ignore];
-
   if (!ignore) {
     SetForwardMouseMessages(NO);
   } else {
@@ -1289,7 +1216,7 @@ content::DesktopMediaID NativeWindowMac::GetDesktopMediaID() const {
   auto desktop_media_id = content::DesktopMediaID(
       content::DesktopMediaID::TYPE_WINDOW, GetAcceleratedWidget());
   // c.f.
-  // https://source.chromium.org/chromium/chromium/src/+/master:chrome/browser/media/webrtc/native_desktop_media_list.cc;l=372?q=kWindowCaptureMacV2&ss=chromium
+  // https://source.chromium.org/chromium/chromium/src/+/main:chrome/browser/media/webrtc/native_desktop_media_list.cc;l=775-780;drc=79502ab47f61bff351426f57f576daef02b1a8dc
   // Refs https://github.com/electron/electron/pull/30507
   // TODO(deepak1556): Match upstream for `kWindowCaptureMacV2`
 #if 0
@@ -1355,18 +1282,15 @@ void NativeWindowMac::SetOverlayIcon(const gfx::Image& overlay,
 void NativeWindowMac::SetVisibleOnAllWorkspaces(bool visible,
                                                 bool visibleOnFullScreen,
                                                 bool skipTransformProcessType) {
-  // In order for NSWindows to be visible on fullscreen we need to functionally
-  // mimic app.dock.hide() since Apple changed the underlying functionality of
+  // In order for NSWindows to be visible on fullscreen we need to invoke
+  // app.dock.hide() since Apple changed the underlying functionality of
   // NSWindows starting with 10.14 to disallow NSWindows from floating on top of
   // fullscreen apps.
   if (!skipTransformProcessType) {
-    ProcessSerialNumber psn = {0, kCurrentProcess};
     if (visibleOnFullScreen) {
-      [window_ setCanHide:NO];
-      TransformProcessType(&psn, kProcessTransformToUIElementApplication);
+      Browser::Get()->DockHide();
     } else {
-      [window_ setCanHide:YES];
-      TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+      Browser::Get()->DockShow(JavascriptEnvironment::GetIsolate());
     }
   }
 
@@ -1548,7 +1472,7 @@ bool NativeWindowMac::GetWindowButtonVisibility() const {
          ![window_ standardWindowButton:NSWindowCloseButton].hidden;
 }
 
-void NativeWindowMac::SetTrafficLightPosition(
+void NativeWindowMac::SetWindowButtonPosition(
     absl::optional<gfx::Point> position) {
   traffic_light_position_ = std::move(position);
   if (buttons_proxy_) {
@@ -1557,7 +1481,7 @@ void NativeWindowMac::SetTrafficLightPosition(
   }
 }
 
-absl::optional<gfx::Point> NativeWindowMac::GetTrafficLightPosition() const {
+absl::optional<gfx::Point> NativeWindowMac::GetWindowButtonPosition() const {
   return traffic_light_position_;
 }
 
@@ -1722,28 +1646,44 @@ void NativeWindowMac::Cleanup() {
   DCHECK(!IsClosed());
   ui::NativeTheme::GetInstanceForNativeUi()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
-  if (wheel_event_monitor_) {
-    [NSEvent removeMonitor:wheel_event_monitor_];
-    wheel_event_monitor_ = nil;
-  }
 }
 
-void NativeWindowMac::OverrideNSWindowContentView() {
-  // When using `views::Widget` to hold WebContents, Chromium would use
-  // `BridgedContentView` as content view, which does not support draggable
-  // regions. In order to make draggable regions work, we have to replace the
-  // content view with a simple NSView.
-  if (has_frame()) {
-    container_view_.reset(
-        [[ElectronAdaptedContentView alloc] initWithShell:this]);
-  } else {
-    container_view_.reset([[FullSizeContentView alloc] init]);
-    [container_view_ setFrame:[[[window_ contentView] superview] bounds]];
+class NativeAppWindowFrameViewMac : public views::NativeFrameViewMac {
+ public:
+  NativeAppWindowFrameViewMac(views::Widget* frame, NativeWindowMac* window)
+      : views::NativeFrameViewMac(frame), native_window_(window) {}
+
+  NativeAppWindowFrameViewMac(const NativeAppWindowFrameViewMac&) = delete;
+  NativeAppWindowFrameViewMac& operator=(const NativeAppWindowFrameViewMac&) =
+      delete;
+
+  ~NativeAppWindowFrameViewMac() override = default;
+
+  // NonClientFrameView:
+  int NonClientHitTest(const gfx::Point& point) override {
+    if (!bounds().Contains(point))
+      return HTNOWHERE;
+
+    if (GetWidget()->IsFullscreen())
+      return HTCLIENT;
+
+    // Check for possible draggable region in the client area for the frameless
+    // window.
+    int contents_hit_test = native_window_->NonClientHitTest(point);
+    if (contents_hit_test != HTNOWHERE)
+      return contents_hit_test;
+
+    return HTCLIENT;
   }
-  [container_view_
-      setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-  [window_ setContentView:container_view_];
-  AddContentViewLayers();
+
+ private:
+  // Weak.
+  raw_ptr<NativeWindowMac> const native_window_;
+};
+
+std::unique_ptr<views::NonClientFrameView>
+NativeWindowMac::CreateNonClientFrameView(views::Widget* widget) {
+  return std::make_unique<NativeAppWindowFrameViewMac>(widget, this);
 }
 
 bool NativeWindowMac::HasStyleMask(NSUInteger flag) const {
@@ -1805,22 +1745,6 @@ void NativeWindowMac::AddContentViewLayers() {
       [[window_ contentView] setLayer:background_layer];
     }
     [[window_ contentView] setWantsLayer:YES];
-  }
-
-  if (!has_frame()) {
-    // In OSX 10.10, adding subviews to the root view for the NSView hierarchy
-    // produces warnings. To eliminate the warnings, we resize the contentView
-    // to fill the window, and add subviews to that.
-    // http://crbug.com/380412
-    if (!original_set_frame_size) {
-      Class cl = [[window_ contentView] class];
-      original_set_frame_size = class_replaceMethod(
-          cl, @selector(setFrameSize:), (IMP)SetFrameSize, "v@:{_NSSize=ff}");
-      original_view_did_move_to_superview =
-          class_replaceMethod(cl, @selector(viewDidMoveToSuperview),
-                              (IMP)ViewDidMoveToSuperview, "v@:");
-      [[window_ contentView] viewDidMoveToWindow];
-    }
   }
 }
 

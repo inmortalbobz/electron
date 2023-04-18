@@ -15,7 +15,9 @@ except ImportError:
   from urllib2 import urlopen
 import zipfile
 
-from lib.config import is_verbose_mode
+# from lib.config import is_verbose_mode
+def is_verbose_mode():
+  return False
 
 ELECTRON_DIR = os.path.abspath(
   os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -23,11 +25,8 @@ ELECTRON_DIR = os.path.abspath(
 TS_NODE = os.path.join(ELECTRON_DIR, 'node_modules', '.bin', 'ts-node')
 SRC_DIR = os.path.abspath(os.path.join(__file__, '..', '..', '..', '..'))
 
-NPM = 'npm'
 if sys.platform in ['win32', 'cygwin']:
-  NPM += '.cmd'
   TS_NODE += '.cmd'
-
 
 @contextlib.contextmanager
 def scoped_cwd(path):
@@ -37,18 +36,6 @@ def scoped_cwd(path):
     yield
   finally:
     os.chdir(cwd)
-
-
-@contextlib.contextmanager
-def scoped_env(key, value):
-  origin = ''
-  if key in os.environ:
-    origin = os.environ[key]
-  os.environ[key] = value
-  try:
-    yield
-  finally:
-    os.environ[key] = origin
 
 
 def download(text, url, path):
@@ -149,11 +136,17 @@ def get_electron_branding():
   with open(branding_file_path) as f:
     return json.load(f)
 
+
+cached_electron_version = None
 def get_electron_version():
-  SOURCE_ROOT = os.path.abspath(os.path.join(__file__, '..', '..', '..'))
-  version_file = os.path.join(SOURCE_ROOT, 'ELECTRON_VERSION')
-  with open(version_file) as f:
-    return 'v' + f.read().strip()
+  global cached_electron_version
+  if cached_electron_version is None:
+    cached_electron_version = str.strip(execute([
+      'node',
+      '-p',
+      'require("./script/lib/get-version").getElectronVersion()'
+    ], cwd=ELECTRON_DIR).decode())
+  return cached_electron_version
 
 def store_artifact(prefix, key_prefix, files):
   # Azure Storage
@@ -207,3 +200,14 @@ def get_buildtools_executable(name):
   if sys.platform == 'win32':
     path += '.exe'
   return path
+
+def get_linux_binaries():
+  return [
+    'chrome-sandbox',
+    'chrome_crashpad_handler',
+    get_electron_branding()['project_name'],
+    'libEGL.so',
+    'libGLESv2.so',
+    'libffmpeg.so',
+    'libvk_swiftshader.so',
+  ]

@@ -4,10 +4,11 @@
 # https://git-scm.com/docs/gitignore
 
 # Upgrades WG
-/patches/                               @electron/wg-upgrades @electron/wg-security
+/patches/                               @electron/patch-owners
 DEPS                                    @electron/wg-upgrades
 
 # Releases WG
+/docs/breaking-changes.md               @electron/wg-releases
 /npm/                                   @electron/wg-releases
 /script/release                         @electron/wg-releases
 

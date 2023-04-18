@@ -42,12 +42,13 @@ class BrowserProcessImpl : public BrowserProcess {
   static void ApplyProxyModeFromCommandLine(ValueMapPrefStore* pref_store);
 
   BuildState* GetBuildState() override;
-  breadcrumbs::BreadcrumbPersistentStorageManager*
-  GetBreadcrumbPersistentStorageManager() override;
   void PostEarlyInitialization();
   void PreCreateThreads();
   void PostDestroyThreads() {}
   void PostMainMessageLoopRun();
+
+  void SetSystemLocale(const std::string& locale);
+  const std::string& GetSystemLocale() const;
 
   void EndSession() override {}
   void FlushLocalStateAndReply(base::OnceClosure reply) override {}
@@ -92,6 +93,7 @@ class BrowserProcessImpl : public BrowserProcess {
   resource_coordinator::TabManager* GetTabManager() override;
   SerialPolicyAllowedPorts* serial_policy_allowed_ports() override;
   HidPolicyAllowedDevices* hid_policy_allowed_devices() override;
+  HidSystemTrayIcon* hid_system_tray_icon() override;
   void CreateDevToolsProtocolHandler() override {}
   void CreateDevToolsAutoOpener() override {}
   void set_background_mode_manager_for_test(
@@ -103,13 +105,18 @@ class BrowserProcessImpl : public BrowserProcess {
   const std::string& GetApplicationLocale() override;
   printing::PrintJobManager* print_job_manager() override;
   StartupData* startup_data() override;
+  device::GeolocationManager* geolocation_manager() override;
+  void SetGeolocationManager(
+      std::unique_ptr<device::GeolocationManager> geolocation_manager) override;
 
  private:
 #if BUILDFLAG(ENABLE_PRINTING)
   std::unique_ptr<printing::PrintJobManager> print_job_manager_;
 #endif
   std::unique_ptr<PrefService> local_state_;
+  std::unique_ptr<device::GeolocationManager> geolocation_manager_;
   std::string locale_;
+  std::string system_locale_;
 };
 
 #endif  // ELECTRON_SHELL_BROWSER_BROWSER_PROCESS_IMPL_H_

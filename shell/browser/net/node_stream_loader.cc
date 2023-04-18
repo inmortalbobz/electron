@@ -58,7 +58,8 @@ void NodeStreamLoader::Start(network::mojom::URLResponseHeadPtr head) {
   }
 
   producer_ = std::make_unique<mojo::DataPipeProducer>(std::move(producer));
-  client_->OnReceiveResponse(std::move(head), std::move(consumer));
+  client_->OnReceiveResponse(std::move(head), std::move(consumer),
+                             absl::nullopt);
 
   auto weak = weak_factory_.GetWeakPtr();
   On("end",
@@ -84,7 +85,10 @@ void NodeStreamLoader::NotifyComplete(int result) {
     return;
   }
 
-  client_->OnComplete(network::URLLoaderCompletionStatus(result));
+  network::URLLoaderCompletionStatus status(result);
+  status.completion_time = base::TimeTicks::Now();
+  status.decoded_body_length = bytes_written_;
+  client_->OnComplete(status);
   delete this;
 }
 
@@ -124,6 +128,8 @@ void NodeStreamLoader::ReadMore() {
 
   // Hold the buffer until the write is done.
   buffer_.Reset(isolate_, buffer);
+
+  bytes_written_ += node::Buffer::Length(buffer);
 
   // Write buffer to mojo pipe asynchronously.
   is_reading_ = false;

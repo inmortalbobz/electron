@@ -295,13 +295,13 @@ browsers apply to Electron's renderers, too. The two primary tools at your
 disposal  are currently `requestIdleCallback()` for small operations and
 `Web Workers` for long-running operations.
 
-*`requestIdleCallback()`* allows developers to queue up a function to be
+_`requestIdleCallback()`_ allows developers to queue up a function to be
 executed as soon as the process is entering an idle period. It enables you to
 perform low-priority or background work without impacting the user experience.
 For more information about how to use it,
 [check out its documentation on MDN][request-idle-callback].
 
-*Web Workers* are a powerful tool to run code on a separate thread. There are
+_Web Workers_ are a powerful tool to run code on a separate thread. There are
 some caveats to consider – consult Electron's
 [multithreading documentation][multithreading] and the
 [MDN documentation for Web Workers][web-workers]. They're an ideal solution
@@ -419,14 +419,25 @@ environment that needs to handle both Node.js and browser environments.
 As of writing this article, the popular choices include [Webpack][webpack],
 [Parcel][parcel], and [rollup.js][rollup].
 
+### 8. Call `Menu.setApplicationMenu(null)` when you do not need a default menu
+
+Electron will set a default menu on startup with some standard entries. But there are reasons your application might want to change that and it will benefit startup performance.
+
+#### Why?
+
+If you build your own menu or use a frameless window without native menu, you should tell Electron early enough to not setup the default menu.
+
+#### How?
+
+Call `Menu.setApplicationMenu(null)` before `app.on("ready")`. This will prevent Electron from setting a default menu. See also https://github.com/electron/electron/issues/35512 for a related discussion.
+
 [security]: ./security.md
 [chrome-devtools-tutorial]: https://developers.google.com/web/tools/chrome-devtools/evaluate-performance/
 [worker-threads]: https://nodejs.org/api/worker_threads.html
 [web-workers]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers
 [request-idle-callback]: https://developer.mozilla.org/en-US/docs/Web/API/Window/requestIdleCallback
 [multithreading]: ./multithreading.md
-[caniuse]: https://caniuse.com/
-[jquery-need]: http://youmightnotneedjquery.com/
+[jquery-need]: https://youmightnotneedjquery.com/
 [service-workers]: https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
 [webpack]: https://webpack.js.org/
 [parcel]: https://parceljs.org/

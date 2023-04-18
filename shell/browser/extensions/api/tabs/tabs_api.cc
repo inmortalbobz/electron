@@ -86,8 +86,9 @@ ExecuteCodeFunction::InitResult ExecuteCodeInTabFunction::Init() {
   if (!details_value.is_dict())
     return set_init_result(VALIDATION_FAILURE);
   std::unique_ptr<InjectDetails> details(new InjectDetails());
-  if (!InjectDetails::Populate(details_value, details.get()))
+  if (!InjectDetails::Populate(details_value.GetDict(), *details)) {
     return set_init_result(VALIDATION_FAILURE);
+  }
 
   if (tab_id == -1) {
     // There's no useful concept of a "default tab" in Electron.
@@ -183,13 +184,12 @@ bool TabsExecuteScriptFunction::ShouldRemoveCSS() const {
 }
 
 ExtensionFunction::ResponseAction TabsReloadFunction::Run() {
-  std::unique_ptr<tabs::Reload::Params> params(
-      tabs::Reload::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  absl::optional<tabs::Reload::Params> params =
+      tabs::Reload::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   bool bypass_cache = false;
-  if (params->reload_properties.get() &&
-      params->reload_properties->bypass_cache.get()) {
+  if (params->reload_properties && params->reload_properties->bypass_cache) {
     bypass_cache = *params->reload_properties->bypass_cache;
   }
 
@@ -207,8 +207,8 @@ ExtensionFunction::ResponseAction TabsReloadFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction TabsGetFunction::Run() {
-  std::unique_ptr<tabs::Get::Params> params(tabs::Get::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  absl::optional<tabs::Get::Params> params = tabs::Get::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
   int tab_id = params->tab_id;
 
   auto* contents = electron::api::WebContents::FromID(tab_id);
@@ -217,12 +217,11 @@ ExtensionFunction::ResponseAction TabsGetFunction::Run() {
 
   tabs::Tab tab;
 
-  tab.id = std::make_unique<int>(tab_id);
+  tab.id = tab_id;
   // TODO(nornagon): in Chrome, the tab URL is only available to extensions
   // that have the "tabs" (or "activeTab") permission. We should do the same
   // permission check here.
-  tab.url = std::make_unique<std::string>(
-      contents->web_contents()->GetLastCommittedURL().spec());
+  tab.url = contents->web_contents()->GetLastCommittedURL().spec();
 
   tab.active = contents->IsFocused();
 
@@ -230,8 +229,8 @@ ExtensionFunction::ResponseAction TabsGetFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction TabsSetZoomFunction::Run() {
-  std::unique_ptr<tabs::SetZoom::Params> params(
-      tabs::SetZoom::Params::Create(args()));
+  absl::optional<tabs::SetZoom::Params> params =
+      tabs::SetZoom::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = params->tab_id ? *params->tab_id : -1;
@@ -258,8 +257,8 @@ ExtensionFunction::ResponseAction TabsSetZoomFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction TabsGetZoomFunction::Run() {
-  std::unique_ptr<tabs::GetZoom::Params> params(
-      tabs::GetZoom::Params::Create(args()));
+  absl::optional<tabs::GetZoomSettings::Params> params =
+      tabs::GetZoomSettings::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = params->tab_id ? *params->tab_id : -1;
@@ -274,8 +273,8 @@ ExtensionFunction::ResponseAction TabsGetZoomFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction TabsGetZoomSettingsFunction::Run() {
-  std::unique_ptr<tabs::GetZoomSettings::Params> params(
-      tabs::GetZoomSettings::Params::Create(args()));
+  absl::optional<tabs::GetZoomSettings::Params> params =
+      tabs::GetZoomSettings::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = params->tab_id ? *params->tab_id : -1;
@@ -288,8 +287,8 @@ ExtensionFunction::ResponseAction TabsGetZoomSettingsFunction::Run() {
       contents->GetZoomController()->zoom_mode();
   tabs::ZoomSettings zoom_settings;
   ZoomModeToZoomSettings(zoom_mode, &zoom_settings);
-  zoom_settings.default_zoom_factor = std::make_unique<double>(
-      blink::PageZoomLevelToZoomFactor(zoom_controller->GetDefaultZoomLevel()));
+  zoom_settings.default_zoom_factor =
+      blink::PageZoomLevelToZoomFactor(zoom_controller->GetDefaultZoomLevel());
 
   return RespondNow(
       ArgumentList(tabs::GetZoomSettings::Results::Create(zoom_settings)));
@@ -298,8 +297,8 @@ ExtensionFunction::ResponseAction TabsGetZoomSettingsFunction::Run() {
 ExtensionFunction::ResponseAction TabsSetZoomSettingsFunction::Run() {
   using tabs::ZoomSettings;
 
-  std::unique_ptr<tabs::SetZoomSettings::Params> params(
-      tabs::SetZoomSettings::Params::Create(args()));
+  absl::optional<tabs::SetZoomSettings::Params> params =
+      tabs::SetZoomSettings::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = params->tab_id ? *params->tab_id : -1;
@@ -425,9 +424,9 @@ bool PrepareURLForNavigation(const std::string& url_string,
 TabsUpdateFunction::TabsUpdateFunction() : web_contents_(nullptr) {}
 
 ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
-  std::unique_ptr<tabs::Update::Params> params(
-      tabs::Update::Params::Create(args()));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  absl::optional<tabs::Update::Params> params =
+      tabs::Update::Params::Create(args());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   int tab_id = params->tab_id ? *params->tab_id : -1;
   auto* contents = electron::api::WebContents::FromID(tab_id);
@@ -438,13 +437,13 @@ ExtensionFunction::ResponseAction TabsUpdateFunction::Run() {
 
   // Navigate the tab to a new location if the url is different.
   std::string error;
-  if (params->update_properties.url.get()) {
+  if (params->update_properties.url) {
     std::string updated_url = *params->update_properties.url;
     if (!UpdateURL(updated_url, tab_id, &error))
       return RespondNow(Error(std::move(error)));
   }
 
-  if (params->update_properties.muted.get()) {
+  if (params->update_properties.muted) {
     contents->SetAudioMuted(*params->update_properties.muted);
   }
 
@@ -502,27 +501,13 @@ ExtensionFunction::ResponseValue TabsUpdateFunction::GetResult() {
   tabs::Tab tab;
 
   auto* api_web_contents = electron::api::WebContents::From(web_contents_);
-  tab.id =
-      std::make_unique<int>(api_web_contents ? api_web_contents->ID() : -1);
+  tab.id = (api_web_contents ? api_web_contents->ID() : -1);
   // TODO(nornagon): in Chrome, the tab URL is only available to extensions
   // that have the "tabs" (or "activeTab") permission. We should do the same
   // permission check here.
-  tab.url = std::make_unique<std::string>(
-      web_contents_->GetLastCommittedURL().spec());
+  tab.url = web_contents_->GetLastCommittedURL().spec();
 
   return ArgumentList(tabs::Get::Results::Create(std::move(tab)));
-}
-
-void TabsUpdateFunction::OnExecuteCodeFinished(
-    const std::string& error,
-    const GURL& url,
-    const base::ListValue& script_result) {
-  if (!error.empty()) {
-    Respond(Error(error));
-    return;
-  }
-
-  return Respond(GetResult());
 }
 
 }  // namespace extensions

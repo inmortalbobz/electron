@@ -7,7 +7,7 @@ Build libc++ as static library to compile and pass
 nan tests
 
 diff --git a/buildtools/third_party/libc++/BUILD.gn b/buildtools/third_party/libc++/BUILD.gn
-index b3e5378f711c54b76c73179e791646d4e5e4e96b..262c8e53ec25b2e91a73b5971d64dbe5d5e005a1 100644
+index 21421aa32047dc1479693c5a5f7aa209aafa05d3..ed1972a765574bdc380ea0670b45906ad66aca69 100644
 --- a/buildtools/third_party/libc++/BUILD.gn
 +++ b/buildtools/third_party/libc++/BUILD.gn
 @@ -44,7 +44,11 @@ config("winver") {
@@ -32,7 +32,7 @@ index b3e5378f711c54b76c73179e791646d4e5e4e96b..262c8e53ec25b2e91a73b5971d64dbe5
    ]
    if (is_linux) {
 diff --git a/buildtools/third_party/libc++abi/BUILD.gn b/buildtools/third_party/libc++abi/BUILD.gn
-index 40f1285f14c0843405e0ee51879b8742285a006d..5be895d3e36df53a5960006a1513f1322400fd23 100644
+index 3ab30c4f8776b9b60e736e69c9bfbce99263ff97..3e8ed18b836f863deafd28a6363b7de2bcdc1863 100644
 --- a/buildtools/third_party/libc++abi/BUILD.gn
 +++ b/buildtools/third_party/libc++abi/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -42,5 +42,5 @@ index 40f1285f14c0843405e0ee51879b8742285a006d..5be895d3e36df53a5960006a1513f132
 -source_set("libc++abi") {
 +static_library("libc++abi") {
    if (export_libcxxabi_from_executables) {
-     visibility = [ "//build/config:executable_deps" ]
-   } else {
+     visibility = [
+       "//build/config:executable_deps",

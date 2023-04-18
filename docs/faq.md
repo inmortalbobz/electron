@@ -60,7 +60,7 @@ garbage collected.
 If you encounter this problem, the following articles may prove helpful:
 
 * [Memory Management][memory-management]
-* [Variable Scope][variable-scope]
+* [Closures][closures]
 
 If you want a quick fix, you can make the variables global by changing your
 code from this:
@@ -135,7 +135,7 @@ is only available in renderer processes.
 
 If [sub-pixel anti-aliasing](https://alienryderflex.com/sub_pixel/) is deactivated, then fonts on LCD screens can look blurry. Example:
 
-![subpixel rendering example]
+![Subpixel rendering example](images/subpixel-rendering-screenshot.gif)
 
 Sub-pixel anti-aliasing needs a non-transparent background of the layer containing the font glyphs. (See [this issue](https://github.com/electron/electron/issues/6344#issuecomment-420371918) for more info).
 
@@ -153,12 +153,10 @@ The effect is visible only on (some?) LCD screens. Even if you don't see a diffe
 Notice that just setting the background in the CSS does not have the desired effect.
 
 [memory-management]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_Management
-[variable-scope]: https://msdn.microsoft.com/library/bzt2dkta(v=vs.94).aspx
-[electron-module]: https://www.npmjs.com/package/electron
+[closures]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Closures
 [storage]: https://developer.mozilla.org/en-US/docs/Web/API/Storage
 [local-storage]: https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage
 [session-storage]: https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage
 [indexed-db]: https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API
 [message-port]: https://developer.mozilla.org/en-US/docs/Web/API/MessagePort
 [browser-window]: api/browser-window.md
-[subpixel rendering example]: images/subpixel-rendering-screenshot.gif

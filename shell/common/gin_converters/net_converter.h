@@ -11,6 +11,7 @@
 
 #include "gin/converter.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
+#include "services/network/public/mojom/host_resolver.mojom.h"
 #include "services/network/public/mojom/url_request.mojom.h"
 #include "shell/browser/net/cert_verifier_client.h"
 
@@ -109,6 +110,47 @@ struct Converter<net::RedirectInfo> {
                                    const net::RedirectInfo& val);
 };
 
+template <>
+struct Converter<net::IPEndPoint> {
+  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
+                                   const net::IPEndPoint& val);
+};
+
+template <>
+struct Converter<net::DnsQueryType> {
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     net::DnsQueryType* out);
+};
+
+template <>
+struct Converter<net::HostResolverSource> {
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     net::HostResolverSource* out);
+};
+
+template <>
+struct Converter<network::mojom::ResolveHostParameters::CacheUsage> {
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     network::mojom::ResolveHostParameters::CacheUsage* out);
+};
+
+template <>
+struct Converter<network::mojom::SecureDnsPolicy> {
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     network::mojom::SecureDnsPolicy* out);
+};
+
+template <>
+struct Converter<network::mojom::ResolveHostParametersPtr> {
+  static bool FromV8(v8::Isolate* isolate,
+                     v8::Local<v8::Value> val,
+                     network::mojom::ResolveHostParametersPtr* out);
+};
+
 template <typename K, typename V>
 struct Converter<std::vector<std::pair<K, V>>> {
   static bool FromV8(v8::Isolate* isolate,
@@ -128,11 +170,11 @@ struct Converter<std::vector<std::pair<K, V>>> {
       if (!obj->Get(context, v8key).ToLocal(&v8value))
         return false;
       K key;
-      V value;
+      V out_value;
       if (!ConvertFromV8(isolate, v8key, &key) ||
-          !ConvertFromV8(isolate, v8value, &value))
+          !ConvertFromV8(isolate, v8value, &out_value))
         return false;
-      (*out).emplace_back(std::move(key), std::move(value));
+      (*out).emplace_back(std::move(key), std::move(out_value));
     }
     return true;
   }

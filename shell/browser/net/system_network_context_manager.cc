@@ -17,7 +17,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/sync/os_crypt.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
@@ -42,12 +42,8 @@
 #include "shell/common/options_switches.h"
 #include "url/gurl.h"
 
-#if BUILDFLAG(IS_MAC)
-#include "components/os_crypt/keychain_password_mac.h"
-#endif
-
 #if BUILDFLAG(IS_LINUX)
-#include "components/os_crypt/key_storage_config_linux.h"
+#include "components/os_crypt/sync/key_storage_config_linux.h"
 #endif
 
 namespace {
@@ -287,12 +283,6 @@ void SystemNetworkContextManager::OnNetworkServiceCreated(
   content::GetNetworkService()->ConfigureStubHostResolver(
       base::FeatureList::IsEnabled(features::kAsyncDns),
       default_secure_dns_mode, doh_config, additional_dns_query_types_enabled);
-
-  std::string app_name = electron::Browser::Get()->GetName();
-#if BUILDFLAG(IS_MAC)
-  KeychainPassword::GetServiceName() = app_name + " Safe Storage";
-  KeychainPassword::GetAccountName() = app_name;
-#endif
 
   // The OSCrypt keys are process bound, so if network service is out of
   // process, send it the required key.

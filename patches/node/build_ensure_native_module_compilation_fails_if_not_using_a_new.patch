@@ -7,19 +7,19 @@ Subject: build: ensure native module compilation fails if not using a new
 This should not be upstreamed, it is a quality-of-life patch for downstream module builders.
 
 diff --git a/common.gypi b/common.gypi
-index ca08deeb19f5fe9ee399ad809b24579fdaa10036..c68cf1eb0f9cdd2a8fe314237c1e790fe3690272 100644
+index 528ae2c370bc41fd245daea33ff8114cee68fce9..d56ed716c3245c9f89c750df232639318927749b 100644
 --- a/common.gypi
 +++ b/common.gypi
-@@ -85,6 +85,8 @@
- 
-     'v8_enable_reverse_jsargs%': 1,
+@@ -79,6 +79,8 @@
+     # TODO(refack): make v8-perfetto happen
+     'v8_use_perfetto': 0,
  
 +    'using_electron_config_gypi%': 0,
 +
      ##### end V8 defaults #####
  
      # When building native modules using 'npm install' with the system npm,
-@@ -290,6 +292,7 @@
+@@ -282,6 +284,7 @@
        'V8_DEPRECATION_WARNINGS',
        'V8_IMMINENT_DEPRECATION_WARNINGS',
        '_GLIBCXX_USE_CXX11_ABI=1',
@@ -27,7 +27,7 @@ index ca08deeb19f5fe9ee399ad809b24579fdaa10036..c68cf1eb0f9cdd2a8fe314237c1e790f
      ],
  
      # Forcibly disable -Werror.  We support a wide range of compilers, it's
-@@ -393,6 +396,11 @@
+@@ -388,6 +391,11 @@
            }],
          ],
        }],
@@ -40,19 +40,19 @@ index ca08deeb19f5fe9ee399ad809b24579fdaa10036..c68cf1eb0f9cdd2a8fe314237c1e790f
          'defines': [
            'V8_COMPRESS_POINTERS',
 diff --git a/configure.py b/configure.py
-index 426afed7cd0a3a403d4b753af0b25f55024d0f71..6ab1469c07298c9083a77d0211727a6fff37267e 100755
+index bfa20f5fc7a64b30b464327f4086a027e9a23359..f9d849260c3d7b1368d375125ae587eaa396c49e 100755
 --- a/configure.py
 +++ b/configure.py
-@@ -1427,6 +1427,7 @@ def configure_library(lib, output, pkgname=None):
+@@ -1517,6 +1517,7 @@ def configure_library(lib, output, pkgname=None):
  
  
  def configure_v8(o):
 +  o['variables']['using_electron_config_gypi'] = 1
    o['variables']['v8_enable_webassembly'] = 1
+   o['variables']['v8_enable_javascript_promise_hooks'] = 1
    o['variables']['v8_enable_lite_mode'] = 1 if options.v8_lite_mode else 0
-   o['variables']['v8_enable_gdbjit'] = 1 if options.gdb else 0
 diff --git a/src/node.h b/src/node.h
-index 0b807cb25f9eb52b2100f0e2a7c25344790967cf..a41b09047d2c499a90225651a8324ad83a7712e3 100644
+index 173e0bc669a2fd90e764da72e09003f4c7311fd7..03f55b0a1853c055eb6c709a8e7916c2a95672d3 100644
 --- a/src/node.h
 +++ b/src/node.h
 @@ -22,6 +22,12 @@
@@ -61,7 +61,7 @@ index 0b807cb25f9eb52b2100f0e2a7c25344790967cf..a41b09047d2c499a90225651a8324ad8
  
 +#ifdef ELECTRON_ENSURE_CONFIG_GYPI
 +#ifndef USING_ELECTRON_CONFIG_GYPI
-+#error "It looks like you are building this native module without using the right config.gypi.  This normally means that you need to update electron-rebuild (>=3.2.8) or node-gyp (>=8.4.0) if you're building modules directly."
++#error "It looks like you are building this native module without using the right config.gypi.  This normally means that you need to update electron-rebuild (>=3.2.8) or node-gyp (>=9.0.0) if you're building modules directly."
 +#endif
 +#endif
 +
